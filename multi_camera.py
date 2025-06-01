@@ -13,7 +13,6 @@ class Camera:
   def __init__(self, name):
     self.name = name
     self.output_directory = os.path.join('D', os.path.sep, 'abi_data', 'raw_data', 'setup', 'test_cameras', self.name)
-    self.frame_time = 0
     self.metadata = []
     self.video_timestamp = None
 
@@ -37,6 +36,8 @@ class Context:
 
     # The cameras are triggered by an Arduino; when we don't get triggered within a certain amount of time, we assume the beam
     # has become unbroken
+    self.frame_sentinel = self.camera_names[0]
+    self.frame_time = 0
     self.max_frame_delta = timedelta(seconds=self.sampling_rate * 1.5)
 
     # Create an image format converter. This is used to convert the raw frames to something that can be written to a video
@@ -98,40 +99,41 @@ class Context:
         camera_id = grab.GetCameraContext()
         frame_camera = self.cameras[camera_id]
 
-        frame_delta = grab.GetTimeStamp() - frame_camera.frame_time
-        max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
+        if frame_camera.name == self.frame_sentinel:
+          frame_delta = grab.GetTimeStamp() - self.frame_time
+          max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
 
-        if frame_delta > max_frame_delta:
-          print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
+          self.frame_time = grab.GetTimeStamp()
 
-          for camera in self.cameras.values():
-            # If this is our first video, there's no current video to finalize
-            if camera.video_writer:
-              print('Finishing previous video')
-              camera.video_writer.release()
+          if frame_delta > max_frame_delta:
+            print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
 
-              file_name = f'metadata_{camera.name}_{camera.video_timestamp}'
+            for camera in self.cameras.values():
+              # If this is our first video, there's no current video to finalize
+              if camera.video_writer:
+                print('Finishing previous video')
+                camera.video_writer.release()
+
+                file_name = f'metadata_{camera.name}_{camera.video_timestamp}'
+                file_path = os.path.join(camera.output_directory, file_name)
+                df = pd.DataFrame(camera.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+                df.to_csv(file_path, index=False)
+
+              # Start a new video
+              camera.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+              file_name = f"{camera.name}_{camera.video_timestamp}.avi"
               file_path = os.path.join(camera.output_directory, file_name)
-              df = pd.DataFrame(camera.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
-              df.to_csv(file_path, index=False)
 
-            # Start a new video
-            camera.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-            file_name = f"{camera.name}_{camera.video_timestamp}.avi"
-            file_path = os.path.join(camera.output_directory, file_name)
+              print(f'Starting new video for {camera.name} at {file_path}')
 
-            print(f'Starting new video for {camera.name} at {file_path}')
+              camera.video_writer = cv2.VideoWriter(
+                file_path,
+                self.fourcc,
+                self.frame_rate,
+                self.output_resolution
+              )
 
-            camera.video_writer = cv2.VideoWriter(
-              file_path,
-              self.fourcc,
-              self.frame_rate,
-              self.output_resolution
-            )
-
-            camera.metadata = []
-
-        frame_camera.frame_time = grab.GetTimeStamp()
+              camera.metadata = []
 
         frame = self.converter.Convert(grab).GetArray()
         frame_camera.video_writer.write(frame)
