@@ -88,11 +88,13 @@ class Context:
     
     try:
       while True:
+          print('Looping')
           grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
           if not grab:
              print('Nothing to grab')
 
           ttl_state = (grab.ChunkLineStatusAll.Value >> self.trigger_line) & 1
+          print(f'Camera: {self.camera_state.name}, TTL: {ttl_state}')
 
           if self.camera_state == CameraState.Idle:
             if ttl_state:
