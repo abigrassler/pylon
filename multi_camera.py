@@ -101,7 +101,10 @@ class Context:
         frame_delta = grab.GetTimeStamp() - camera.frame_time
         max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
 
-        print(f'{camera.name}, {camera.frame_time}, {grab.GetTimeStamp()}, {frame_delta}')
+        print(f'{camera.name}, {camera.frame_time}, {grab.GetTimeStamp()}, {frame_delta}, {max_frame_delta}')
+
+        if frame_delta > max_frame_delta:
+          print('too big')
 
         # if frame_delta > max_frame_delta:
         #   print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
