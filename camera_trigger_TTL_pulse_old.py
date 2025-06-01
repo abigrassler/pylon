@@ -19,6 +19,16 @@ import pandas as pd
 
 ##### function to start and stop grabbing images with a TTL pulse #####
 def grab_during_ttl(cam, converter, video_writer, metadata_list, trigger_line_bit=3):
+    """Grabs frames while TTL (beam break) line is high.
+    
+    Args:
+        cam: Open and configured Pylon camera.
+        converter: ImageFormatConverter object.
+        video_writer: OpenCV VideoWriter object.
+        metadata_list: list to append (timestamp, line_status, counter_value).
+        trigger_line_bit: Which digital line to monitor (default is Line3 → bit 3).
+    """
+
     cam.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByUser) # Starts a steady stream of images, provides 1 frame at a time when triggered 
     print("Waiting for TTL HIGH to begin recording...")
 
