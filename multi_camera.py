@@ -133,7 +133,7 @@ class Context:
 
         #     camera.metadata = []
 
-        # camera.frame_time = grab.GetTimeStamp()
+        camera.frame_time = grab.GetTimeStamp()
 
         # frame = self.converter.Convert(grab).GetArray()
         # camera.video_writer.write(frame)
