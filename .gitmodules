@@ -1,0 +1,3 @@
+[submodule "pypylon-samples"]
+	path = pypylon-samples
+	url = https://github.com/basler/pypylon-samples.git
