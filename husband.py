@@ -1,5 +1,6 @@
 import cv2
 import enum
+import itertools
 import os
 import pandas as pd
 
@@ -79,14 +80,13 @@ class Context:
     
     try:
       while True:
-        print('Looping')
         grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
 
         frame_delta = grab.GetTimeStamp() - self.frame_timestamp
         max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
 
         if frame_delta > max_frame_delta:
-          print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}')
+          print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
 
           # If this is our first video, there's no current video to finalize
           if self.video_writer:
@@ -99,10 +99,11 @@ class Context:
             df.to_csv(file_path, index=False)
 
           # Start a new video
-          print('Starting new video')
           self.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
           file_name = f'camA_{self.video_timestamp}.avi'
           file_path = os.path.join(self.camera_dir, file_name)
+
+          print(f'Starting new video at {file_path}')
 
           self.video_writer = cv2.VideoWriter(
             file_path,
@@ -115,12 +116,11 @@ class Context:
 
         self.frame_timestamp = grab.GetTimeStamp()
 
-        print(f'Writing a frame')
         frame = self.converter.Convert(grab).GetArray()
         self.video_writer.write(frame)
 
         metadata = (
-          grab.ChunkTimestamp,
+          grab.ChunkTimestamp.Value,
           grab.ChunkLineStatusAll.Value,
           grab.ChunkCounterValue.Value
         )
