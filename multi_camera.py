@@ -104,7 +104,7 @@ class Context:
         if frame_delta > max_frame_delta:
           print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
 
-          for camera in self.cameras:
+          for camera in self.cameras.values():
             # If this is our first video, there's no current video to finalize
             if camera.video_writer:
               print('Finishing previous video')
