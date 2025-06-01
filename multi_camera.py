@@ -38,7 +38,7 @@ class Context:
     # has become unbroken
     self.frame_sentinel = self.camera_names[0]
     self.frame_time = 0
-    self.max_frame_delta = timedelta(seconds=self.sampling_rate * 1.5)
+    self.max_frame_delta = timedelta(seconds=self.sampling_rate * 4)
 
     # Create an image format converter. This is used to convert the raw frames to something that can be written to a video
     self.converter = pylon.ImageFormatConverter()
