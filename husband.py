@@ -113,6 +113,8 @@ class Context:
 
           self.metadata = []
 
+        self.frame_timestamp = grab.GetTimeStamp()
+
         print(f'Writing a frame')
         frame = self.converter.Convert(grab).GetArray()
         self.video_writer.write(frame)
