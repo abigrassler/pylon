@@ -1,0 +1,138 @@
+import cv2
+import enum
+import os
+import pandas as pd
+
+from pypylon import pylon, genicam
+from datetime import datetime
+
+class CameraState(enum.Enum):
+   Idle = enum.auto()
+   Recording = enum.auto()
+
+
+
+class Context:
+  def __init__(self):
+    # Discover and connect to camera
+    tlf = pylon.TlFactory.GetInstance()
+    self.cam = pylon.InstantCamera(tlf.CreateFirstDevice())
+    self.cam.Open()
+    self.camera_state = CameraState.Idle
+    self.beam_timeout = 1000
+    self.trigger_line = 3
+    self.trigger_line_id = f'Line{self.trigger_line}'
+    self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    self.frame_rate = 200.0
+    self.output_resolution = (800, 600)
+
+    # Load the default camera configuration 
+    self.cam.UserSetSelector.Value = "Default"
+    self.cam.UserSetLoad.Execute()
+
+    # Select recording settings
+    self.camera_dir = os.path.join('D', os.path.sep, 'abi_data', 'raw_data', 'setup', 'test_cameras', 'camA')
+    os.makedirs(self.camera_dir, exist_ok=True) 
+
+    # Set the chunks you want (metadata). Here we want to sample IO lines on each framestart trigger 
+    chunks = ["LineStatusAll", "Timestamp", "CounterValue"]
+    self.cam.ChunkModeActive.SetValue(True) #attach metadata to each image 
+    for chunk in chunks:
+      self.cam.ChunkSelector.SetValue(chunk) #metadata about IO line status for each image (state of TTL pulse)
+      if chunk == "CounterValue":
+        self.cam.CounterSelector.SetValue("Counter1")
+        self.cam.CounterEventSource.SetValue("FrameStart")
+      self.cam.ChunkEnable.SetValue(True) #activates chunk you are interested in (LineStatus)
+
+      if not self.cam.ChunkEnable.GetValue():
+        print(f'Tried to enable chunk {chunk}, but it reported as disabled')
+
+    # Set image quality and format settings 
+    self.cam.Height.SetValue(600)
+    self.cam.Width.SetValue(800)
+    self.cam.ExposureTime.SetValue(3000)
+    self.cam.AcquisitionFrameRateEnable.SetValue(True)
+    self.cam.AcquisitionFrameRate.SetValue(200)
+    self.cam.GainAuto.SetValue("Continuous")
+
+    # Setup the trigger/acquisition controls 
+    self.cam.TriggerSelector.SetValue("FrameStart")
+    self.cam.TriggerActivation.SetValue("RisingEdge")
+    self.cam.TriggerSource.SetValue(self.trigger_line_id)
+    self.cam.TriggerMode.SetValue("On")
+
+    # Create an image format converter
+    self.converter = pylon.ImageFormatConverter()
+    self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed  # For OpenCV (color)
+    self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
+
+    # We'll start a new video whenever the beam is broken, so just make a placeh
+    self.video_writer: cv2.VideoWriter = None
+
+    self.metadata = []
+    self.timestamp = None
+
+  def write_one_frame(self, grab):
+    frame = self.converter.Convert(grab).GetArray()
+    self.video_writer.write(frame)
+
+    metadata = (
+      grab.ChunkTimestamp,
+      grab.ChunkLineStatusAll.Value,
+      grab.ChunkCounterValue.Value
+    )
+    self.metadata.append(metadata)
+
+  def run_loop(self):
+    self.cam.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByUser) # Starts a steady stream of images, provides 1 frame at a time when triggered 
+    
+    try:
+      while True:
+          grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
+          if not grab:
+             print('Nothing to grab')
+
+          ttl_state = (grab.ChunkLineStatusAll.Value >> self.trigger_line) & 1
+
+          if self.camera_state == CameraState.Idle:
+            if ttl_state:
+              self.timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+              file_name = f'camA_{self.timestamp}.avi'
+              file_path = os.path.join(self.camera_dir, file_name)
+
+              self.video_writer = cv2.VideoWriter(
+                file_path,
+                self.fourcc,
+                self.frame_rate,
+                self.output_resolution
+              )
+
+              self.metadata = []
+
+              self.write_one_frame(grab)
+
+              self.state = CameraState.Recording
+
+          elif self.camera_state == CameraState.Recording:
+              if ttl_state:
+                self.write_one_frame(grab)
+              else:
+                self.video_writer.release()
+
+                file_name = f'metadata_{self.timestamp}'
+                file_path = os.path.join(self.camera_dir, file_name)
+                df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+                df.to_csv(file_path, index=False)
+
+                self.state = CameraState.Idle
+    except KeyboardInterrupt:
+       print('Recording was stopped by user.')
+    finally:
+      self.cam.StopGrabbing()
+      self.cam.Close()
+      cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+   context = Context()
+   context.run_loop()
+
