@@ -9,26 +9,28 @@ import matplotlib.pyplot as plt
 from pypylon import pylon, genicam
 from datetime import datetime, timedelta
 
-# Ask Thomas where this belongs if you don't sort it out 
-NUM_CAMERAS = 4  
+class Camera:
+  def __init__(self, name):
+    self.name = name
+    self.output_directory = os.path.join('D', os.path.sep, 'abi_data', 'raw_data', 'setup', 'test_cameras', self.name)
+    self.metadata = []
+    self.video_timestamp = None
 
-class CameraState(enum.Enum):
-   Idle = enum.auto()
-   Recording = enum.auto()
+    # We'll start a new video whenever the beam is broken, so just make a placeh
+    self.video_writer: cv2.VideoWriter = None
 
+    os.makedirs(self.output_directory, exist_ok=True)
 
 
 class Context:
   def __init__(self):
-    # Discover and connect to camera
-    tlf = pylon.TlFactory.GetInstance()
-    # For multuple cameras: 
-    devs = tlf.EnumerateDevices([])
-    self.cam_array = pylon.InstantCameraArray(NUM_CAMERAS)
-    for idx, cam in enumerate(self.cam_array):
-        cam.Attach(tlf.CreateDevice(devs[idx]))
-        cam.Open()
-
+    self.cameras = [
+      Camera('camA'),
+      Camera('camB'),
+      Camera('camC'),
+      Camera('camD')
+    ]
+    self.num_cameras = len(self.cameras)
     self.trigger_line = 3
     self.trigger_line_id = f'Line{self.trigger_line}'
     self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
@@ -36,58 +38,56 @@ class Context:
     self.sampling_rate = 1.0 / self.frame_rate
     self.output_resolution = (800, 600)
 
-    # Load the default camera configuration 
-    self.cam_array.UserSetSelector.Value = "Default"
-    self.cam_array.UserSetLoad.Execute()
+    # The cameras are triggered by an Arduino; when we don't get triggered within a certain amount of time, we assume the beam
+    # has become unbroken
+    self.frame_timestamp = 0
+    self.max_frame_delta = timedelta(seconds=self.sampling_rate * 1.5)
 
-    # Select recording settings
-    camera_names = ["camA", "camB", "camC", "camD"]
-    experiment_day_dir = os.path.join('D', os.path.sep, 'abi_data', 'raw_data', 'setup', 'test_cameras')
-
-    for camera_ID in camera_names: 
-        self.camera_dir = os.path.join(experiment_day_dir, camera_ID)
-        os.makedirs(self.camera_dir, exist_ok=True)
-
-
-    # Set the chunks you want (metadata). Here we want to sample IO lines on each framestart trigger 
-    chunks = ["LineStatusAll", "Timestamp", "CounterValue"]
-    self.cam_array.ChunkModeActive.SetValue(True) #attach metadata to each image 
-    for chunk in chunks:
-      self.cam_array.ChunkSelector.SetValue(chunk) #metadata about IO line status for each image (state of TTL pulse)
-      if chunk == "CounterValue":
-        self.cam_array.CounterSelector.SetValue("Counter1")
-        self.cam_array.CounterEventSource.SetValue("FrameStart")
-      self.cam_array.ChunkEnable.SetValue(True) #activates chunk you are interested in (LineStatus)
-
-      if not self.cam_array.ChunkEnable.GetValue():
-        print(f'Tried to enable chunk {chunk}, but it reported as disabled')
-
-    # Set image quality and format settings 
-    self.cam_array.Height.SetValue(600)
-    self.cam_array.Width.SetValue(800)
-    self.cam_array.ExposureTime.SetValue(3000)
-    self.cam_array.AcquisitionFrameRateEnable.SetValue(True)
-    self.cam_array.AcquisitionFrameRate.SetValue(200)
-    self.cam_array.GainAuto.SetValue("Continuous")
-
-    # Setup the trigger/acquisition controls 
-    self.cam_array.TriggerSelector.SetValue("FrameStart")
-    self.cam_array.TriggerActivation.SetValue("RisingEdge")
-    self.cam_array.TriggerSource.SetValue(self.trigger_line_id)
-    self.cam_array.TriggerMode.SetValue("On")
-
-    # Create an image format converter
+    # Create an image format converter. This is used to convert the raw frames to something that can be written to a video
     self.converter = pylon.ImageFormatConverter()
     self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed  # For OpenCV (color)
     self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
 
-    # We'll start a new video whenever the beam is broken, so just make a placeh
-    self.video_writer: cv2.VideoWriter = None
+    # Discover and connect to camera
+    tlf = pylon.TlFactory.GetInstance()
 
-    self.metadata = []
-    self.video_timestamp = None
-    self.frame_timestamp = 0
-    self.max_frame_delta = timedelta(seconds=self.sampling_rate * 1.5)
+    # For multuple cameras: 
+    devices = tlf.EnumerateDevices([])
+    self.cam_array = pylon.InstantCameraArray(self.num_cameras)
+    for idx, camera in enumerate(self.cam_array):
+      camera.Attach(tlf.CreateDevice(devices[idx]))
+      camera.Open()
+
+      # Load the default camera configuration 
+      camera.UserSetSelector.Value = "Default"
+      camera.UserSetLoad.Execute()
+
+      # Set the chunks you want (metadata). Here we want to sample IO lines on each framestart trigger 
+      chunks = ["LineStatusAll", "Timestamp", "CounterValue"]
+      camera.ChunkModeActive.SetValue(True) #attach metadata to each image 
+      for chunk in chunks:
+        camera.ChunkSelector.SetValue(chunk) #metadata about IO line status for each image (state of TTL pulse)
+        if chunk == "CounterValue":
+          camera.CounterSelector.SetValue("Counter1")
+          camera.CounterEventSource.SetValue("FrameStart")
+        camera.ChunkEnable.SetValue(True) #activates chunk you are interested in (LineStatus)
+
+        if not camera.ChunkEnable.GetValue():
+          print(f'Tried to enable chunk {chunk} for camera {camera.name}, but it reported as disabled')
+
+      # Set image quality and format settings 
+      camera.Height.SetValue(600)
+      camera.Width.SetValue(800)
+      camera.ExposureTime.SetValue(3000)
+      camera.AcquisitionFrameRateEnable.SetValue(True)
+      camera.AcquisitionFrameRate.SetValue(200)
+      camera.GainAuto.SetValue("Continuous")
+
+      # Setup the trigger/acquisition controls 
+      camera.TriggerSelector.SetValue("FrameStart")
+      camera.TriggerActivation.SetValue("RisingEdge")
+      camera.TriggerSource.SetValue(self.trigger_line_id)
+      camera.TriggerMode.SetValue("On")
 
   def run_loop(self):
     self.cam_array.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByUser) # Starts a steady stream of images, provides 1 frame at a time when triggered 
