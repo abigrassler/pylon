@@ -4,7 +4,7 @@ import os
 import pandas as pd
 
 from pypylon import pylon, genicam
-from datetime import datetime
+from datetime import datetime, timedelta
 
 class CameraState(enum.Enum):
    Idle = enum.auto()
@@ -19,11 +19,11 @@ class Context:
     self.cam = pylon.InstantCamera(tlf.CreateFirstDevice())
     self.cam.Open()
     self.camera_state = CameraState.Idle
-    self.beam_timeout = 1000
     self.trigger_line = 3
     self.trigger_line_id = f'Line{self.trigger_line}'
     self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
     self.frame_rate = 200.0
+    self.sampling_rate = 1.0 / self.frame_rate
     self.output_resolution = (800, 600)
 
     # Load the default camera configuration 
@@ -70,58 +70,60 @@ class Context:
     self.video_writer: cv2.VideoWriter = None
 
     self.metadata = []
-    self.timestamp = None
-
-  def write_one_frame(self, grab):
-    frame = self.converter.Convert(grab).GetArray()
-    self.video_writer.write(frame)
-
-    metadata = (
-      grab.ChunkTimestamp,
-      grab.ChunkLineStatusAll.Value,
-      grab.ChunkCounterValue.Value
-    )
-    self.metadata.append(metadata)
+    self.video_timestamp = None
+    self.frame_timestamp = 0
+    self.max_frame_delta = timedelta(seconds=self.sampling_rate * 1.5)
 
   def run_loop(self):
     self.cam.StartGrabbing(pylon.GrabStrategy_OneByOne, pylon.GrabLoop_ProvidedByUser) # Starts a steady stream of images, provides 1 frame at a time when triggered 
     
     try:
       while True:
-          print('Looping')
-          grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
-          print(grab.GetTimeStamp())
+        print('Looping')
+        grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
 
-          # if self.camera_state == CameraState.Idle:
-          #   self.timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-          #   file_name = f'camA_{self.timestamp}.avi'
-          #   file_path = os.path.join(self.camera_dir, file_name)
+        frame_delta = grab.GetTimeStamp() - self.frame_timestamp
+        max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
 
-          #   self.video_writer = cv2.VideoWriter(
-          #     file_path,
-          #     self.fourcc,
-          #     self.frame_rate,
-          #     self.output_resolution
-          #   )
+        if frame_delta > max_frame_delta:
+          print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}')
 
-          #   self.metadata = []
+          # If this is our first video, there's no current video to finalize
+          if self.video_writer:
+            print('Finishing previous video')
+            self.video_writer.release()
 
-          #   self.write_one_frame(grab)
+            file_name = f'metadata_{self.video_timestamp}'
+            file_path = os.path.join(self.camera_dir, file_name)
+            df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+            df.to_csv(file_path, index=False)
 
-          #   self.state = CameraState.Recording
+          # Start a new video
+          print('Starting new video')
+          self.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+          file_name = f'camA_{self.video_timestamp}.avi'
+          file_path = os.path.join(self.camera_dir, file_name)
 
-          # elif self.camera_state == CameraState.Recording:
-          #     if ttl_state:
-          #       self.write_one_frame(grab)
-          #     else:
-          #       self.video_writer.release()
+          self.video_writer = cv2.VideoWriter(
+            file_path,
+            self.fourcc,
+            self.frame_rate,
+            self.output_resolution
+          )
 
-          #       file_name = f'metadata_{self.timestamp}'
-          #       file_path = os.path.join(self.camera_dir, file_name)
-          #       df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
-          #       df.to_csv(file_path, index=False)
+          self.metadata = []
 
-          #       self.state = CameraState.Idle
+        print(f'Writing a frame')
+        frame = self.converter.Convert(grab).GetArray()
+        self.video_writer.write(frame)
+
+        metadata = (
+          grab.ChunkTimestamp,
+          grab.ChunkLineStatusAll.Value,
+          grab.ChunkCounterValue.Value
+        )
+        self.metadata.append(metadata)
+
     except KeyboardInterrupt:
        print('Recording was stopped by user.')
     finally:
