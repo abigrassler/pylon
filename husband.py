@@ -90,43 +90,38 @@ class Context:
       while True:
           print('Looping')
           grab = self.cam.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
-          if not grab:
-             print('Nothing to grab')
+          print(grab.GetTimeStamp())
 
-          ttl_state = (grab.ChunkLineStatusAll.Value >> self.trigger_line) & 1
-          print(f'Camera: {self.camera_state.name}, TTL: {ttl_state}')
+          # if self.camera_state == CameraState.Idle:
+          #   self.timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+          #   file_name = f'camA_{self.timestamp}.avi'
+          #   file_path = os.path.join(self.camera_dir, file_name)
 
-          if self.camera_state == CameraState.Idle:
-            if ttl_state:
-              self.timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-              file_name = f'camA_{self.timestamp}.avi'
-              file_path = os.path.join(self.camera_dir, file_name)
+          #   self.video_writer = cv2.VideoWriter(
+          #     file_path,
+          #     self.fourcc,
+          #     self.frame_rate,
+          #     self.output_resolution
+          #   )
 
-              self.video_writer = cv2.VideoWriter(
-                file_path,
-                self.fourcc,
-                self.frame_rate,
-                self.output_resolution
-              )
+          #   self.metadata = []
 
-              self.metadata = []
+          #   self.write_one_frame(grab)
 
-              self.write_one_frame(grab)
+          #   self.state = CameraState.Recording
 
-              self.state = CameraState.Recording
+          # elif self.camera_state == CameraState.Recording:
+          #     if ttl_state:
+          #       self.write_one_frame(grab)
+          #     else:
+          #       self.video_writer.release()
 
-          elif self.camera_state == CameraState.Recording:
-              if ttl_state:
-                self.write_one_frame(grab)
-              else:
-                self.video_writer.release()
+          #       file_name = f'metadata_{self.timestamp}'
+          #       file_path = os.path.join(self.camera_dir, file_name)
+          #       df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+          #       df.to_csv(file_path, index=False)
 
-                file_name = f'metadata_{self.timestamp}'
-                file_path = os.path.join(self.camera_dir, file_name)
-                df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
-                df.to_csv(file_path, index=False)
-
-                self.state = CameraState.Idle
+          #       self.state = CameraState.Idle
     except KeyboardInterrupt:
        print('Recording was stopped by user.')
     finally:
