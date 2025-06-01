@@ -104,31 +104,32 @@ class Context:
         if frame_delta > max_frame_delta:
           print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
 
-          # If this is our first video, there's no current video to finalize
-          if camera.video_writer:
-            print('Finishing previous video')
-            camera.video_writer.release()
+          for camera in self.cameras:
+            # If this is our first video, there's no current video to finalize
+            if camera.video_writer:
+              print('Finishing previous video')
+              camera.video_writer.release()
 
-            file_name = f'metadata_{camera.name}_{camera.video_timestamp}'
+              file_name = f'metadata_{camera.name}_{camera.video_timestamp}'
+              file_path = os.path.join(camera.output_directory, file_name)
+              df = pd.DataFrame(camera.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+              df.to_csv(file_path, index=False)
+
+            # Start a new video
+            camera.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+            file_name = f"{camera.name}_{camera.video_timestamp}.avi"
             file_path = os.path.join(camera.output_directory, file_name)
-            df = pd.DataFrame(camera.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
-            df.to_csv(file_path, index=False)
 
-          # Start a new video
-          camera.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-          file_name = f"{camera.name}_{camera.video_timestamp}.avi"
-          file_path = os.path.join(camera.output_directory, file_name)
+            print(f'Starting new video for {camera.name} at {file_path}')
 
-          print(f'Starting new video for {camera.name} at {file_path}')
+            camera.video_writer = cv2.VideoWriter(
+              file_path,
+              self.fourcc,
+              self.frame_rate,
+              self.output_resolution
+            )
 
-          camera.video_writer = cv2.VideoWriter(
-            file_path,
-            self.fourcc,
-            self.frame_rate,
-            self.output_resolution
-          )
-
-          camera.metadata = []
+            camera.metadata = []
 
         self.frame_timestamp = grab.GetTimeStamp()
 
