@@ -51,7 +51,6 @@ class Context:
     devices = tlf.EnumerateDevices([])
     self.cam_array = pylon.InstantCameraArray(self.num_cameras)
     for idx, camera in enumerate(self.cam_array):
-      print(f'Camera {idx} -> {self.camera_names[idx]} [{camera.DeviceInfo.GetSerialNumber()}]')
       self.cameras[idx] = Camera(self.camera_names[idx])
 
       camera.Attach(tlf.CreateDevice(devices[idx]))
@@ -98,52 +97,49 @@ class Context:
         grab = self.cam_array.RetrieveResult(pylon.waitForever, pylon.TimeoutHandling_Return)
         camera_id = grab.GetCameraContext()
         camera = self.cameras[camera_id]
-        print(camera.name)
 
-        # frame_delta = grab.GetTimeStamp() - self.frame_timestamp
-        # max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
+        frame_delta = grab.GetTimeStamp() - self.frame_timestamp
+        max_frame_delta = self.max_frame_delta.total_seconds() * (10 ** 9) # Convert our delta from seconds to nanoseconds
 
-        # if frame_delta > max_frame_delta:
-        #   print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
+        if frame_delta > max_frame_delta:
+          print(f'Frame delta exceeded; delta = {frame_delta}, max delta = {max_frame_delta}; assuming beam status changed and starting a new video')
 
-        #   # If this is our first video, there's no current video to finalize
-        #   if self.video_writer:
-        #     print('Finishing previous video')
-        #     self.video_writer.release()
+          # If this is our first video, there's no current video to finalize
+          if camera.video_writer:
+            print('Finishing previous video')
+            camera.video_writer.release()
 
-        #     file_name = f'metadata_{self.video_timestamp}'
-        #     file_path = os.path.join(self.camera_dir, file_name)
-        #     df = pd.DataFrame(self.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
-        #     df.to_csv(file_path, index=False)
+            file_name = f'metadata_{camera.name}_{camera.video_timestamp}'
+            file_path = os.path.join(camera.output_directory, file_name)
+            df = pd.DataFrame(camera.metadata, columns=["Timestamp_ns", "LineStatusAll", "CounterValue"])
+            df.to_csv(file_path, index=False)
 
-        #   # Start a new video
-        #   self.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
-        #   for camera_ID in camera_names: 
-        #     filename = f"{camera_ID}_{self.video_timestamp}.avi"
-        #     file_path = os.path.join(camera_dir, filename)
+          # Start a new video
+          camera.video_timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S-%f')
+          file_name = f"{camera.name}_{camera.video_timestamp}.avi"
+          file_path = os.path.join(camera.output_directory, file_name)
 
-        #   print(f'Starting new video at {file_path}')
+          print(f'Starting new video for {camera.name} at {file_path}')
 
-        #   self.video_writer = cv2.VideoWriter(
-        #     file_path,
-        #     self.fourcc,
-        #     self.frame_rate,
-        #     self.output_resolution
-        #   )
+          camera.video_writer = cv2.VideoWriter(
+            file_path,
+            self.fourcc,
+            self.frame_rate,
+            self.output_resolution
+          )
 
-        #   self.metadata = []
+          camera.metadata = []
 
-        # self.frame_timestamp = grab.GetTimeStamp()
+        self.frame_timestamp = grab.GetTimeStamp()
 
-        # frame = self.converter.Convert(grab).GetArray()
-        # self.video_writer.write(frame)
+        frame = self.converter.Convert(grab).GetArray()
+        camera.video_writer.write(frame)
 
-        # metadata = (
-        #   grab.ChunkTimestamp.Value,
-        #   grab.ChunkLineStatusAll.Value,
-        #   grab.ChunkCounterValue.Value
-        # )
-        # self.metadata.append(metadata)
+        camera.metadata.append((
+          grab.ChunkTimestamp.Value,
+          grab.ChunkLineStatusAll.Value,
+          grab.ChunkCounterValue.Value
+        ))
 
     except KeyboardInterrupt:
        print('Recording was stopped by user.')
